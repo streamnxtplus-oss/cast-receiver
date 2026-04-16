@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StreamNXT Cast Receiver</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a14;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* Idle screen — shown when connected but no media playing */
+    #splash {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #0a0614, #0a0a14);
+      z-index: 10;
+      transition: opacity 0.5s ease;
+    }
+    #splash.hidden { opacity: 0; pointer-events: none; }
+
+    #splash .logo {
+      width: 200px;
+      height: 80px;
+      object-fit: contain;
+      margin-bottom: 24px;
+    }
+    #splash .logo-text {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      background: linear-gradient(135deg, #e63946, #ff8c42);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 16px;
+    }
+    #splash .tagline {
+      font-size: 18px;
+      color: rgba(255,255,255,0.5);
+      font-weight: 400;
+    }
+    #splash .ready-text {
+      margin-top: 40px;
+      font-size: 14px;
+      color: rgba(255,255,255,0.3);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 0.7; }
+    }
+
+    /* Player */
+    #player {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 5;
+    }
+    cast-media-player {
+      width: 100%;
+      height: 100%;
+      --background-color: #0a0a14;
+      --advancement-color: #e63946;
+      --advancement-disabled-color: rgba(255,255,255,0.2);
+      --splash-image: none;
+      --splash-size: contain;
+      --spinner-color: #e63946;
+      --playback-logo-image: none;
+      --watermark-color: rgba(255,255,255,0.15);
+    }
+
+    /* Overlay branding on top of player */
+    #overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      padding: 24px 32px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    #overlay.visible { opacity: 1; }
+
+    #overlay .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    #overlay .brand-logo {
+      height: 32px;
+      object-fit: contain;
+    }
+    #overlay .brand-name {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    #overlay .now-playing {
+      text-align: right;
+    }
+    #overlay .now-playing .title {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    #overlay .now-playing .subtitle {
+      font-size: 13px;
+      color: rgba(255,255,255,0.6);
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Idle/Splash Screen -->
+  <div id="splash">
+    <div class="logo-text" id="platformName">StreamNXT</div>
+    <div class="tagline" id="tagline">Your Entertainment, Your Way</div>
+    <div class="ready-text">Ready to cast</div>
+  </div>
+
+  <!-- Cast Media Player (Google's built-in player component) -->
+  <div id="player">
+    <cast-media-player></cast-media-player>
+  </div>
+
+  <!-- Top overlay with branding + now playing info -->
+  <div id="overlay">
+    <div class="brand">
+      <span class="brand-name" id="overlayBrand">StreamNXT</span>
+    </div>
+    <div class="now-playing">
+      <div class="title" id="mediaTitle"></div>
+      <div class="subtitle" id="mediaSubtitle"></div>
+    </div>
+  </div>
+
+  <!-- Google Cast CAF Receiver SDK -->
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+
+  <script>
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
+
+    // ── Configuration ──
+    const options = new cast.framework.CastReceiverOptions();
+    options.disableIdleTimeout = false;
+    options.maxInactivity = 300; // 5 min idle timeout
+    options.supportedCommands =
+      cast.framework.messages.Command.ALL_BASIC_MEDIA |
+      cast.framework.messages.Command.STREAM_VOLUME |
+      cast.framework.messages.Command.STREAM_MUTE;
+
+    // ── Splash / Player visibility ──
+    const splash = document.getElementById('splash');
+    const overlay = document.getElementById('overlay');
+    const mediaTitle = document.getElementById('mediaTitle');
+    const mediaSubtitle = document.getElementById('mediaSubtitle');
+
+    let overlayTimer = null;
+
+    function showOverlay() {
+      overlay.classList.add('visible');
+      clearTimeout(overlayTimer);
+      overlayTimer = setTimeout(() => overlay.classList.remove('visible'), 5000);
+    }
+
+    // ── Player Events ──
+
+    // Media loaded — hide splash, show overlay briefly
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
+      (event) => {
+        splash.classList.add('hidden');
+
+        const media = playerManager.getMediaInformation();
+        if (media && media.metadata) {
+          mediaTitle.textContent = media.metadata.title || '';
+          mediaSubtitle.textContent = media.metadata.subtitle || '';
+        }
+        showOverlay();
+      }
+    );
+
+    // Media ended — show splash again
+    playerManager.addEventListener(
+      cast.framework.events.EventType.MEDIA_FINISHED,
+      () => {
+        splash.classList.remove('hidden');
+        mediaTitle.textContent = '';
+        mediaSubtitle.textContent = '';
+      }
+    );
+
+    // Playback started/resumed — flash overlay
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PLAYING,
+      () => showOverlay()
+    );
+
+    // Pause — show overlay persistently
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PAUSE,
+      () => {
+        overlay.classList.add('visible');
+        clearTimeout(overlayTimer);
+      }
+    );
+
+    // Seek — flash overlay
+    playerManager.addEventListener(
+      cast.framework.events.EventType.SEEKED,
+      () => showOverlay()
+    );
+
+    // ── Intercept LOAD request for custom handling ──
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      (request) => {
+        // Allow all HLS streams
+        if (request.media && request.media.contentType === 'application/x-mpegurl') {
+          request.media.hlsSegmentFormat = cast.framework.messages.HlsSegmentFormat.TS;
+        }
+        return request;
+      }
+    );
+
+    // ── Error handling ──
+    playerManager.addEventListener(
+      cast.framework.events.EventType.ERROR,
+      (event) => {
+        console.error('[StreamNXT Receiver] Error:', event.detailedErrorCode, event);
+      }
+    );
+
+    // ── Start the receiver ──
+    context.start(options);
+    console.log('[StreamNXT Receiver] Started');
+  </script>
+</body>
+</html>

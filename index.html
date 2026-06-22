@@ -80,6 +80,45 @@
       --watermark-color: rgba(255,255,255,0.15);
     }
 
+    /* Forensic fingerprint watermark — above the video, never blocks input.
+       Sits below the transient branding overlay so the title stays readable. */
+    #wm-layer {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 15;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .wm {
+      position: absolute;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      color: #ffffff;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.55);
+      transition: top 0.6s ease, left 0.6s ease, right 0.6s ease, bottom 0.6s ease;
+    }
+    #wm-tiled {
+      position: absolute;
+      top: -10%; left: -10%; right: -10%; bottom: -10%;
+      z-index: 15;
+      pointer-events: none;
+      display: none;
+      transform: rotate(-24deg);
+      flex-wrap: wrap;
+      align-content: space-around;
+      justify-content: space-around;
+    }
+    #wm-tiled .wm-cell {
+      width: 32%;
+      text-align: center;
+      font-weight: 500;
+      white-space: nowrap;
+      color: #ffffff;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
+
     /* Overlay branding on top of player */
     #overlay {
       position: absolute;
@@ -138,6 +177,10 @@
     <cast-media-player></cast-media-player>
   </div>
 
+  <!-- Forensic fingerprint watermark (single roaming/fixed + tiled grid) -->
+  <div id="wm-layer"><div id="wm" class="wm"></div></div>
+  <div id="wm-tiled"></div>
+
   <!-- Top overlay with branding + now playing info -->
   <div id="overlay">
     <div class="brand">
@@ -179,9 +222,123 @@
       overlayTimer = setTimeout(() => overlay.classList.remove('visible'), 5000);
     }
 
+    // ── Forensic watermark ──────────────────────────────────────────────────
+    // The sender (web / mobile) resolves the per-user fingerprint + style from
+    // the tenant's visibleWatermark config and ships it in media.customData.
+    // The receiver only renders it, so the fingerprint logic stays in one place.
+    const wmEl    = document.getElementById('wm');
+    const wmLayer = document.getElementById('wm-layer');
+    const tiledEl = document.getElementById('wm-tiled');
+
+    const WM_POSITIONS = [
+      { top: '8%',  left: '6%' },
+      { top: '8%',  right: '6%' },
+      { bottom: '12%', left: '6%' },
+      { bottom: '12%', right: '6%' },
+      { top: '42%', left: '30%' },
+      { top: '30%', right: '18%' },
+      { bottom: '28%', left: '20%' },
+      { bottom: '40%', right: '28%' }
+    ];
+
+    let wmCfg = null;
+    let wmPos = 0;
+    let wmRoamTimer = null;
+    let wmClockTimer = null;
+
+    function wmClearTimers() {
+      if (wmRoamTimer)  { clearInterval(wmRoamTimer);  wmRoamTimer = null; }
+      if (wmClockTimer) { clearInterval(wmClockTimer); wmClockTimer = null; }
+    }
+
+    function wmBaseText() {
+      let t = (wmCfg && wmCfg.text) ? String(wmCfg.text) : '';
+      if (wmCfg && wmCfg.showTimestamp) {
+        const d = new Date();
+        const hh = ('0' + d.getHours()).slice(-2);
+        const mm = ('0' + d.getMinutes()).slice(-2);
+        t += '  ' + hh + ':' + mm;
+      }
+      return t;
+    }
+
+    function wmPlace(el, pos) {
+      el.style.top = el.style.bottom = el.style.left = el.style.right = 'auto';
+      if (pos.top    != null) el.style.top    = pos.top;
+      if (pos.bottom != null) el.style.bottom = pos.bottom;
+      if (pos.left   != null) el.style.left   = pos.left;
+      if (pos.right  != null) el.style.right  = pos.right;
+    }
+
+    function wmRender() {
+      wmClearTimers();
+      wmLayer.style.display = 'none';
+      tiledEl.style.display = 'none';
+      if (!wmCfg || !wmCfg.text) return;
+
+      const opacity = (typeof wmCfg.opacity === 'number') ? wmCfg.opacity : 0.12;
+      const color   = wmCfg.color || '#ffffff';
+      // TVs are viewed from a distance — scale the phone/web font up.
+      const fontPx  = Math.round((wmCfg.fontSize || 16) * 1.6);
+      const mode    = wmCfg.mode || 'roaming';
+
+      if (mode === 'tiled') {
+        tiledEl.style.display = 'flex';
+        tiledEl.style.opacity = String(opacity * 0.8);
+        tiledEl.innerHTML = '';
+        const txt = wmBaseText();
+        for (let i = 0; i < 12; i++) {
+          const c = document.createElement('div');
+          c.className = 'wm-cell';
+          c.style.color = color;
+          c.style.fontSize = Math.round(fontPx * 0.85) + 'px';
+          c.style.margin = '2.5% 0';
+          c.textContent = txt;
+          tiledEl.appendChild(c);
+        }
+        if (wmCfg.showTimestamp) {
+          wmClockTimer = setInterval(() => {
+            const t = wmBaseText();
+            tiledEl.querySelectorAll('.wm-cell').forEach((c) => { c.textContent = t; });
+          }, 30000);
+        }
+        return;
+      }
+
+      wmLayer.style.display = 'block';
+      wmEl.style.opacity  = String(opacity);
+      wmEl.style.color    = color;
+      wmEl.style.fontSize = fontPx + 'px';
+      wmEl.textContent    = wmBaseText();
+
+      if (mode === 'fixed') {
+        wmPlace(wmEl, { top: '50%', left: '50%' });
+        wmEl.style.transform = 'translate(-50%, -50%)';
+      } else {
+        wmEl.style.transform = 'none';
+        wmPos = 0;
+        wmPlace(wmEl, WM_POSITIONS[0]);
+        const everyMs = (wmCfg.roamIntervalSec || 20) * 1000;
+        wmRoamTimer = setInterval(() => {
+          wmPos = (wmPos + 1) % WM_POSITIONS.length;
+          wmPlace(wmEl, WM_POSITIONS[wmPos]);
+        }, everyMs);
+      }
+
+      if (wmCfg.showTimestamp) {
+        wmClockTimer = setInterval(() => { wmEl.textContent = wmBaseText(); }, 30000);
+      }
+    }
+
+    function wmHide() {
+      wmClearTimers();
+      wmLayer.style.display = 'none';
+      tiledEl.style.display = 'none';
+    }
+
     // ── Player Events ──
 
-    // Media loaded — hide splash, show overlay briefly
+    // Media loaded — hide splash, show overlay briefly, draw the fingerprint
     playerManager.addEventListener(
       cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
       (event) => {
@@ -193,16 +350,18 @@
           mediaSubtitle.textContent = media.metadata.subtitle || '';
         }
         showOverlay();
+        wmRender();
       }
     );
 
-    // Media ended — show splash again
+    // Media ended — show splash again, drop the fingerprint
     playerManager.addEventListener(
       cast.framework.events.EventType.MEDIA_FINISHED,
       () => {
         splash.classList.remove('hidden');
         mediaTitle.textContent = '';
         mediaSubtitle.textContent = '';
+        wmHide();
       }
     );
 
@@ -231,13 +390,30 @@
     playerManager.setMessageInterceptor(
       cast.framework.messages.MessageType.LOAD,
       (request) => {
-        // Allow all HLS streams
-        if (request.media && request.media.contentType === 'application/x-mpegurl') {
-          request.media.hlsSegmentFormat = cast.framework.messages.HlsSegmentFormat.TS;
-        }
+        // Capture the forensic fingerprint shipped by the sender.
+        try {
+          const cd = request && request.media && request.media.customData;
+          wmCfg = (cd && cd.watermark && cd.watermark.text) ? cd.watermark : null;
+        } catch (e) { wmCfg = null; }
+
+        // IMPORTANT: do NOT force hlsSegmentFormat here. The AUDIO container
+        // differs per title (encoded = TS-wrapped, imported = raw ADTS) and the
+        // sender already sets the correct value. Hard-coding TS — as the old
+        // receiver did — re-broke imported titles (TS demux of raw AAC = no
+        // audio/video). Leave the sender's value untouched.
         return request;
       }
     );
+
+    // Sender may refresh the fingerprint mid-session (optional, safe no-op).
+    context.addCustomMessageListener('urn:x-cast:com.streamnxt.watermark', (event) => {
+      try {
+        const d = event && event.data;
+        wmCfg = (d && d.watermark && d.watermark.text) ? d.watermark
+              : (d && d.text) ? d : null;
+      } catch (e) {}
+      wmRender();
+    });
 
     // ── Error handling ──
     playerManager.addEventListener(

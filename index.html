@@ -36,21 +36,6 @@
       object-fit: contain;
       margin-bottom: 24px;
     }
-    /* App-launch splash video (branded). Hidden + replaced by the text logo
-       if it fails to load. */
-    #splash .splash-video {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    #splash.no-video .splash-video { display: none; }
-    /* When the branded video plays it IS the splash — hide the text logo,
-       tagline and ready hint. They only show as the no-video fallback. */
-    #splash:not(.no-video) .logo-text,
-    #splash:not(.no-video) .tagline,
-    #splash:not(.no-video) .ready-text { display: none; }
     #splash .logo-text {
       font-size: 48px;
       font-weight: 800;
@@ -180,11 +165,8 @@
 </head>
 <body>
 
-  <!-- Idle/Splash Screen — branded app-launch splash video, with the text
-       logo as a fallback when the video can't load. -->
+  <!-- Idle/Splash Screen — branded text logo -->
   <div id="splash">
-    <video class="splash-video" id="splashVideo" autoplay loop muted playsinline
-      src="https://fsn1.your-objectstorage.com/str-bucket/splash/videos/1781805104801-cbdpfs.mp4"></video>
     <div class="logo-text" id="platformName">StreamNxt+</div>
     <div class="tagline" id="tagline">Your Entertainment, Your Way</div>
     <div class="ready-text">Ready to cast</div>
@@ -217,18 +199,6 @@
     const context = cast.framework.CastReceiverContext.getInstance();
     const playerManager = context.getPlayerManager();
 
-    // Splash video fallback — if the branded app-launch video can't load, fall
-    // back to the text logo + tagline.
-    (function () {
-      const sp = document.getElementById('splash');
-      const sv = document.getElementById('splashVideo');
-      if (!sp || !sv) return;
-      sv.addEventListener('error', () => sp.classList.add('no-video'));
-      // Some receivers block autoplay until interaction — nudge it.
-      const p = sv.play && sv.play();
-      if (p && p.catch) p.catch(() => {});
-    })();
-
     // ── Configuration ──
     const options = new cast.framework.CastReceiverOptions();
     options.disableIdleTimeout = false;
@@ -240,37 +210,9 @@
 
     // ── Splash / Player visibility ──
     const splash = document.getElementById('splash');
-    const splashVideo = document.getElementById('splashVideo');
     const overlay = document.getElementById('overlay');
     const mediaTitle = document.getElementById('mediaTitle');
     const mediaSubtitle = document.getElementById('mediaSubtitle');
-
-    // The Chromecast has a SINGLE hardware video decoder. A merely-paused
-    // splash <video> still holds the decoder + audio path, starving the cast
-    // media (no audio, video drops out). So FULLY UNLOAD it (drop the src +
-    // load()) when media plays, and reattach it only when we return to idle.
-    const SPLASH_VIDEO_SRC = splashVideo ? splashVideo.getAttribute('src') : '';
-    function stopSplashVideo() {
-      try {
-        if (!splashVideo) return;
-        splashVideo.pause();
-        splashVideo.removeAttribute('src');
-        splashVideo.load();
-        // Detach from the DOM entirely so it can't hold the decoder while the
-        // cast media starts — pause+unload alone left a ~1s handoff glitch.
-        if (splashVideo.parentNode) splashVideo.parentNode.removeChild(splashVideo);
-      } catch (e) {}
-    }
-    function startSplashVideo() {
-      try {
-        if (!splashVideo || !SPLASH_VIDEO_SRC) return;
-        if (!splashVideo.parentNode) splash.insertBefore(splashVideo, splash.firstChild);
-        splashVideo.setAttribute('src', SPLASH_VIDEO_SRC);
-        splashVideo.load();
-        const p = splashVideo.play();
-        if (p && p.catch) p.catch(() => {});
-      } catch (e) {}
-    }
 
     let overlayTimer = null;
 
@@ -401,7 +343,6 @@
       cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
       (event) => {
         splash.classList.add('hidden');
-        stopSplashVideo();
 
         const media = playerManager.getMediaInformation();
         if (media && media.metadata) {
@@ -418,7 +359,6 @@
       cast.framework.events.EventType.MEDIA_FINISHED,
       () => {
         splash.classList.remove('hidden');
-        startSplashVideo();
         mediaTitle.textContent = '';
         mediaSubtitle.textContent = '';
         wmHide();
@@ -450,10 +390,6 @@
     playerManager.setMessageInterceptor(
       cast.framework.messages.MessageType.LOAD,
       (request) => {
-        // Free the single hardware decoder + audio path for the cast media as
-        // early as possible — before it starts decoding.
-        stopSplashVideo();
-
         // Capture the forensic fingerprint shipped by the sender.
         try {
           const cd = request && request.media && request.media.customData;

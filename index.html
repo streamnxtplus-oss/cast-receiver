@@ -240,9 +240,17 @@
 
     // ── Splash / Player visibility ──
     const splash = document.getElementById('splash');
+    const splashVideo = document.getElementById('splashVideo');
     const overlay = document.getElementById('overlay');
     const mediaTitle = document.getElementById('mediaTitle');
     const mediaSubtitle = document.getElementById('mediaSubtitle');
+
+    // The Chromecast has a SINGLE hardware video decoder. The looping splash
+    // video keeps decoding even while #splash is hidden, so it starves the
+    // cast media of the decoder + audio path → no audio and the video drops
+    // out. Free it the moment media loads; resume it when we go idle again.
+    function stopSplashVideo() { try { splashVideo && splashVideo.pause(); } catch (e) {} }
+    function startSplashVideo() { try { if (splashVideo) { splashVideo.currentTime = 0; const p = splashVideo.play(); if (p && p.catch) p.catch(() => {}); } } catch (e) {} }
 
     let overlayTimer = null;
 
@@ -373,6 +381,7 @@
       cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
       (event) => {
         splash.classList.add('hidden');
+        stopSplashVideo();
 
         const media = playerManager.getMediaInformation();
         if (media && media.metadata) {
@@ -389,6 +398,7 @@
       cast.framework.events.EventType.MEDIA_FINISHED,
       () => {
         splash.classList.remove('hidden');
+        startSplashVideo();
         mediaTitle.textContent = '';
         mediaSubtitle.textContent = '';
         wmHide();
@@ -420,6 +430,10 @@
     playerManager.setMessageInterceptor(
       cast.framework.messages.MessageType.LOAD,
       (request) => {
+        // Free the single hardware decoder + audio path for the cast media as
+        // early as possible — before it starts decoding.
+        stopSplashVideo();
+
         // Capture the forensic fingerprint shipped by the sender.
         try {
           const cd = request && request.media && request.media.customData;

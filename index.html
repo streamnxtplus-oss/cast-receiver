@@ -36,6 +36,17 @@
       object-fit: contain;
       margin-bottom: 24px;
     }
+    /* App-launch splash video (branded). Hidden + replaced by the text logo
+       if it fails to load. */
+    #splash .splash-video {
+      width: 60%;
+      max-width: 780px;
+      max-height: 62%;
+      object-fit: contain;
+    }
+    #splash.no-video .splash-video { display: none; }
+    #splash:not(.no-video) .logo-text,
+    #splash:not(.no-video) .tagline { display: none; }
     #splash .logo-text {
       font-size: 48px;
       font-weight: 800;
@@ -165,9 +176,12 @@
 </head>
 <body>
 
-  <!-- Idle/Splash Screen -->
+  <!-- Idle/Splash Screen — branded app-launch splash video, with the text
+       logo as a fallback when the video can't load. -->
   <div id="splash">
-    <div class="logo-text" id="platformName">StreamNXT</div>
+    <video class="splash-video" id="splashVideo" autoplay loop muted playsinline
+      src="https://fsn1.your-objectstorage.com/str-bucket/splash/videos/1781805104801-cbdpfs.mp4"></video>
+    <div class="logo-text" id="platformName">StreamNxt+</div>
     <div class="tagline" id="tagline">Your Entertainment, Your Way</div>
     <div class="ready-text">Ready to cast</div>
   </div>
@@ -184,7 +198,7 @@
   <!-- Top overlay with branding + now playing info -->
   <div id="overlay">
     <div class="brand">
-      <span class="brand-name" id="overlayBrand">StreamNXT</span>
+      <span class="brand-name" id="overlayBrand">StreamNxt+</span>
     </div>
     <div class="now-playing">
       <div class="title" id="mediaTitle"></div>
@@ -198,6 +212,18 @@
   <script>
     const context = cast.framework.CastReceiverContext.getInstance();
     const playerManager = context.getPlayerManager();
+
+    // Splash video fallback — if the branded app-launch video can't load, fall
+    // back to the text logo + tagline.
+    (function () {
+      const sp = document.getElementById('splash');
+      const sv = document.getElementById('splashVideo');
+      if (!sp || !sv) return;
+      sv.addEventListener('error', () => sp.classList.add('no-video'));
+      // Some receivers block autoplay until interaction — nudge it.
+      const p = sv.play && sv.play();
+      if (p && p.catch) p.catch(() => {});
+    })();
 
     // ── Configuration ──
     const options = new cast.framework.CastReceiverOptions();

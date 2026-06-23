@@ -255,16 +255,18 @@
         if (!splashVideo) return;
         splashVideo.pause();
         splashVideo.removeAttribute('src');
-        splashVideo.load(); // releases the hardware decoder
+        splashVideo.load();
+        // Detach from the DOM entirely so it can't hold the decoder while the
+        // cast media starts — pause+unload alone left a ~1s handoff glitch.
+        if (splashVideo.parentNode) splashVideo.parentNode.removeChild(splashVideo);
       } catch (e) {}
     }
     function startSplashVideo() {
       try {
         if (!splashVideo || !SPLASH_VIDEO_SRC) return;
-        if (splashVideo.getAttribute('src') !== SPLASH_VIDEO_SRC) {
-          splashVideo.setAttribute('src', SPLASH_VIDEO_SRC);
-          splashVideo.load();
-        }
+        if (!splashVideo.parentNode) splash.insertBefore(splashVideo, splash.firstChild);
+        splashVideo.setAttribute('src', SPLASH_VIDEO_SRC);
+        splashVideo.load();
         const p = splashVideo.play();
         if (p && p.catch) p.catch(() => {});
       } catch (e) {}

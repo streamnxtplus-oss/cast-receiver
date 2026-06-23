@@ -39,14 +39,18 @@
     /* App-launch splash video (branded). Hidden + replaced by the text logo
        if it fails to load. */
     #splash .splash-video {
-      width: 60%;
-      max-width: 780px;
-      max-height: 62%;
-      object-fit: contain;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
     #splash.no-video .splash-video { display: none; }
+    /* When the branded video plays it IS the splash — hide the text logo,
+       tagline and ready hint. They only show as the no-video fallback. */
     #splash:not(.no-video) .logo-text,
-    #splash:not(.no-video) .tagline { display: none; }
+    #splash:not(.no-video) .tagline,
+    #splash:not(.no-video) .ready-text { display: none; }
     #splash .logo-text {
       font-size: 48px;
       font-weight: 800;

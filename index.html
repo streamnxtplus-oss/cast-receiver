@@ -245,12 +245,30 @@
     const mediaTitle = document.getElementById('mediaTitle');
     const mediaSubtitle = document.getElementById('mediaSubtitle');
 
-    // The Chromecast has a SINGLE hardware video decoder. The looping splash
-    // video keeps decoding even while #splash is hidden, so it starves the
-    // cast media of the decoder + audio path → no audio and the video drops
-    // out. Free it the moment media loads; resume it when we go idle again.
-    function stopSplashVideo() { try { splashVideo && splashVideo.pause(); } catch (e) {} }
-    function startSplashVideo() { try { if (splashVideo) { splashVideo.currentTime = 0; const p = splashVideo.play(); if (p && p.catch) p.catch(() => {}); } } catch (e) {} }
+    // The Chromecast has a SINGLE hardware video decoder. A merely-paused
+    // splash <video> still holds the decoder + audio path, starving the cast
+    // media (no audio, video drops out). So FULLY UNLOAD it (drop the src +
+    // load()) when media plays, and reattach it only when we return to idle.
+    const SPLASH_VIDEO_SRC = splashVideo ? splashVideo.getAttribute('src') : '';
+    function stopSplashVideo() {
+      try {
+        if (!splashVideo) return;
+        splashVideo.pause();
+        splashVideo.removeAttribute('src');
+        splashVideo.load(); // releases the hardware decoder
+      } catch (e) {}
+    }
+    function startSplashVideo() {
+      try {
+        if (!splashVideo || !SPLASH_VIDEO_SRC) return;
+        if (splashVideo.getAttribute('src') !== SPLASH_VIDEO_SRC) {
+          splashVideo.setAttribute('src', SPLASH_VIDEO_SRC);
+          splashVideo.load();
+        }
+        const p = splashVideo.play();
+        if (p && p.catch) p.catch(() => {});
+      } catch (e) {}
+    }
 
     let overlayTimer = null;
 

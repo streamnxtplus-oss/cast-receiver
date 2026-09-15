@@ -161,97 +161,7 @@
       color: rgba(255,255,255,0.6);
       margin-top: 4px;
     }
-
-    /* TEMPORARY diagnostics panel — shows what the receiver actually does
-       (load request, network status per request, player state, errors) so a
-       failing cast can be read straight off the TV. Remove once resolved. */
-    #diag {
-      position: absolute;
-      left: 16px; bottom: 16px;
-      max-width: 62%;
-      z-index: 30;
-      pointer-events: none;
-      background: rgba(0,0,0,0.78);
-      border: 1px solid rgba(255,255,255,0.2);
-      border-radius: 8px;
-      padding: 10px 12px;
-      font: 15px/1.35 Menlo, Consolas, monospace;
-      color: #d8f5d0;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-    #diag .err { color: #ff8a8a; }
   </style>
-  <!-- Must run before the CAF SDK so the network wrappers are in place before
-       the player engine starts making requests. -->
-  <script>
-    (function () {
-      var lines = [];
-      function out() {
-        var el = document.getElementById('diag');
-        if (!el) return;
-        el.innerHTML = lines.map(function (l) {
-          var esc = l.text.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; });
-          return l.err ? '<span class="err">' + esc + '</span>' : esc;
-        }).join('\n');
-      }
-      function diag(text, err) {
-        var t = new Date().toISOString().slice(11, 19);
-        lines.push({ text: t + ' ' + text, err: !!err });
-        if (lines.length > 16) lines.shift();
-        out();
-      }
-      window.__diag = diag;
-      document.addEventListener('DOMContentLoaded', out);
-
-      function kind(u) {
-        var p = String(u).split('?')[0];
-        if (/\.m3u8$/.test(p) || /index\.m3u8/.test(p)) return 'm3u8';
-        if (/\/seg$/.test(p) || /\/aseg$/.test(p) || /\.(ts|aac|m4s|mp4)$/.test(p)) return 'seg';
-        if (/\/key/.test(p)) return 'key';
-        return null;
-      }
-      function short(u) {
-        try { var x = new URL(u, location.href); return x.host + x.pathname.slice(-40); } catch (e) { return String(u).slice(0, 60); }
-      }
-      var okCount = { m3u8: 0, seg: 0, key: 0 };
-      function report(u, status, ms) {
-        var k = kind(u);
-        if (!k) return;
-        var bad = !(status >= 200 && status < 300);
-        if (bad || okCount[k] < 3) {
-          if (!bad) okCount[k]++;
-          diag(k + ' ' + status + ' ' + ms + 'ms ' + short(u), bad);
-        }
-      }
-
-      if (window.fetch) {
-        var f = window.fetch;
-        window.fetch = function (input, init) {
-          var u = typeof input === 'string' ? input : (input && input.url);
-          var t0 = Date.now();
-          return f.apply(this, arguments).then(function (r) {
-            report(u, r.status, Date.now() - t0);
-            return r;
-          }, function (e) {
-            if (kind(u)) diag('FETCH FAIL ' + short(u) + ' ' + (e && e.message), true);
-            throw e;
-          });
-        };
-      }
-      var open = XMLHttpRequest.prototype.open;
-      var send = XMLHttpRequest.prototype.send;
-      XMLHttpRequest.prototype.open = function (m, u) { this.__u = u; return open.apply(this, arguments); };
-      XMLHttpRequest.prototype.send = function () {
-        var x = this, t0 = Date.now();
-        x.addEventListener('loadend', function () {
-          if (x.status === 0) { if (kind(x.__u)) diag('XHR FAIL (status 0 / CORS?) ' + short(x.__u), true); }
-          else report(x.__u, x.status, Date.now() - t0);
-        });
-        return send.apply(this, arguments);
-      };
-    })();
-  </script>
 </head>
 <body>
 
@@ -281,9 +191,6 @@
       <div class="subtitle" id="mediaSubtitle"></div>
     </div>
   </div>
-
-  <!-- TEMPORARY diagnostics panel (see #diag) -->
-  <div id="diag"></div>
 
   <!-- Google Cast CAF Receiver SDK -->
   <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
@@ -515,40 +422,6 @@
         console.error('[StreamNXT Receiver] Error:', event.detailedErrorCode, event);
       }
     );
-
-    // ── TEMPORARY diagnostics (see #diag) ──
-    (function () {
-      const diag = window.__diag || function () {};
-      const E = cast.framework.events.EventType;
-      const codeName = (c) => {
-        const m = cast.framework.events.DetailedErrorCode || {};
-        for (const k in m) if (m[k] === c) return k + '(' + c + ')';
-        return String(c);
-      };
-      playerManager.addEventListener(E.REQUEST_LOAD, (e) => {
-        const m = e && e.requestData && e.requestData.media;
-        if (!m) return;
-        diag('LOAD ' + (m.streamType || '') + ' ' + (m.contentType || '') +
-          ' seg=' + (m.hlsSegmentFormat || '-') + ' vseg=' + (m.hlsVideoSegmentFormat || '-'));
-        diag('URL ' + String(m.contentUrl || m.contentId || '').replace(/([?&]t=)[^&]+/, '$1…').slice(0, 140));
-      });
-      playerManager.addEventListener(E.ERROR, (e) => {
-        let detail = '';
-        try { detail = JSON.stringify(e.error || {}).slice(0, 220); } catch (x) {}
-        diag('ERROR ' + codeName(e.detailedErrorCode) + ' ' + detail, true);
-      });
-      playerManager.addEventListener(E.BUFFERING, (e) => diag('buffering=' + e.isBuffering));
-      playerManager.addEventListener(E.PLAYER_LOAD_COMPLETE, () => diag('LOAD_COMPLETE'));
-      playerManager.addEventListener(E.PLAYING, () => diag('PLAYING'));
-      playerManager.addEventListener(E.PAUSE, () => diag('PAUSE'));
-      playerManager.addEventListener(E.MEDIA_FINISHED, (e) => diag('FINISHED ' + (e && e.endedReason || ''), true));
-      setInterval(() => {
-        try {
-          const s = playerManager.getPlayerState();
-          if (s && s !== 'IDLE') diag('state=' + s + ' t=' + (playerManager.getCurrentTimeSec() || 0).toFixed(1));
-        } catch (x) {}
-      }, 10000);
-    })();
 
     // ── Start the receiver ──
     context.start(options);

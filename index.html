@@ -13,6 +13,12 @@
      * font size follows the smaller viewport side and everything else is rem,
      * so the whole layout scales as one. Clamped so it stays legible on a small
      * browser preview and does not balloon on a huge one.
+     *
+     * COMPATIBILITY: Cast devices run old Chromium builds. No `inset` (Chrome
+     * 87), no flexbox `gap` (84), and `clamp()` (79) only as an override on a
+     * plain value. `inset: 0` on an older receiver left #player with no size —
+     * the video vanished while its audio played — and shrank the splash into
+     * the top-left corner. Use top/right/bottom/left and margins.
      */
     :root {
       --accent: #e63946;
@@ -24,6 +30,7 @@
       /* TV title-safe area: keep text away from the edges some sets crop. */
       --safe-x: 5vw;
       --safe-y: 5vh;
+      font-size: 2.2vmin;
       font-size: clamp(10px, 2.2vmin, 40px);
     }
 
@@ -42,13 +49,14 @@
     /* ── Idle / splash ───────────────────────────────────────────── */
     #splash {
       position: fixed;
-      inset: 0;
+      top: 0; right: 0; bottom: 0; left: 0;
+      width: 100%;
+      height: 100%;
       z-index: 10;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 1.2rem;
       padding: var(--safe-y) var(--safe-x);
       text-align: center;
       background:
@@ -70,6 +78,7 @@
       -webkit-text-fill-color: transparent;
     }
     #splash .tagline {
+      margin-top: 1.2rem;
       font-size: 1.35rem;
       font-weight: 400;
       color: var(--text-dim);
@@ -79,7 +88,6 @@
       margin-top: 2.2rem;
       display: inline-flex;
       align-items: center;
-      gap: 0.7rem;
       padding: 0.7rem 1.4rem;
       border-radius: 999px;
       border: 1px solid rgba(255,255,255,0.12);
@@ -88,6 +96,7 @@
       color: var(--text-dim);
     }
     #splash .ready .dot {
+      margin-right: 0.7rem;
       width: 0.6rem;
       height: 0.6rem;
       border-radius: 50%;
@@ -104,7 +113,9 @@
     /* ── Player ──────────────────────────────────────────────────── */
     #player {
       position: fixed;
-      inset: 0;
+      top: 0; right: 0; bottom: 0; left: 0;
+      width: 100%;
+      height: 100%;
       z-index: 5;
     }
     cast-media-player {
@@ -126,7 +137,7 @@
        Above the video, never blocks input; below the now-playing bar. */
     #wm-layer {
       position: fixed;
-      inset: 0;
+      top: 0; right: 0; bottom: 0; left: 0;
       z-index: 15;
       pointer-events: none;
       overflow: hidden;
@@ -170,7 +181,6 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 2rem;
       padding: var(--safe-y) var(--safe-x) 6rem;
       background: linear-gradient(to bottom, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.35) 55%, transparent 100%);
       opacity: 0;
@@ -182,6 +192,7 @@
 
     #overlay .brand {
       flex: 0 0 auto;
+      margin-right: 2rem;
       font-size: 1.5rem;
       font-weight: 800;
       letter-spacing: -0.01em;
@@ -194,12 +205,12 @@
     #overlay .now-playing {
       display: flex;
       align-items: center;
-      gap: 1.1rem;
       min-width: 0;
       max-width: 60%;
     }
     #overlay .art {
       flex: 0 0 auto;
+      margin-left: 1.1rem;
       width: 6.4rem;
       height: 3.6rem;
       border-radius: 0.5rem;
@@ -217,7 +228,6 @@
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 0.7rem;
       min-width: 0;
     }
     #overlay .title {
@@ -232,7 +242,7 @@
       flex: 0 0 auto;
       display: none;
       align-items: center;
-      gap: 0.4rem;
+      margin-right: 0.7rem;
       padding: 0.2rem 0.6rem;
       border-radius: 0.35rem;
       background: var(--accent);
@@ -243,6 +253,7 @@
     #overlay .live.shown { display: inline-flex; }
     #overlay .live::before {
       content: '';
+      margin-right: 0.4rem;
       width: 0.45rem;
       height: 0.45rem;
       border-radius: 50%;
@@ -259,7 +270,8 @@
 
     /* Narrow / portrait previews: stack instead of squeezing the title. */
     @media (max-aspect-ratio: 4/3) {
-      #overlay { flex-direction: column; align-items: flex-start; gap: 1rem; }
+      #overlay { flex-direction: column; align-items: flex-start; }
+      #overlay .brand { margin: 0 0 1rem 0; }
       #overlay .now-playing { max-width: 100%; }
       #overlay .meta { text-align: left; }
       #overlay .title-row { justify-content: flex-start; }

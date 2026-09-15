@@ -5,102 +5,144 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>StreamNXT Cast Receiver</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    body {
-      background: #0a0a14;
-      color: #fff;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      overflow: hidden;
-      width: 100vw;
-      height: 100vh;
+    /*
+     * Sizing is relative to the screen, never fixed pixels. Cast devices lay
+     * the page out at very different CSS sizes — 1280×720 on older
+     * Chromecasts, 1920×1080 on newer ones, and larger on 4K sets — so pixel
+     * sizes that looked right on one read as "zoomed in" on another. The root
+     * font size follows the smaller viewport side and everything else is rem,
+     * so the whole layout scales as one. Clamped so it stays legible on a small
+     * browser preview and does not balloon on a huge one.
+     */
+    :root {
+      --accent: #e63946;
+      --accent-2: #ff8c42;
+      --bg: #07070d;
+      --text: #ffffff;
+      --text-dim: rgba(255,255,255,0.62);
+      --text-faint: rgba(255,255,255,0.38);
+      /* TV title-safe area: keep text away from the edges some sets crop. */
+      --safe-x: 5vw;
+      --safe-y: 5vh;
+      font-size: clamp(10px, 2.2vmin, 40px);
     }
 
-    /* Idle screen — shown when connected but no media playing */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Idle / splash ───────────────────────────────────────────── */
     #splash {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
+      position: fixed;
+      inset: 0;
+      z-index: 10;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: linear-gradient(145deg, #0a0614, #0a0a14);
-      z-index: 10;
-      transition: opacity 0.5s ease;
+      gap: 1.2rem;
+      padding: var(--safe-y) var(--safe-x);
+      text-align: center;
+      background:
+        radial-gradient(60vmax 60vmax at 20% 15%, rgba(230,57,70,0.18), transparent 60%),
+        radial-gradient(55vmax 55vmax at 85% 90%, rgba(255,140,66,0.12), transparent 60%),
+        linear-gradient(160deg, #0b0812 0%, var(--bg) 60%);
+      transition: opacity 0.6s ease;
     }
     #splash.hidden { opacity: 0; pointer-events: none; }
 
-    #splash .logo {
-      width: 200px;
-      height: 80px;
-      object-fit: contain;
-      margin-bottom: 24px;
-    }
     #splash .logo-text {
-      font-size: 48px;
+      font-size: 4.6rem;
+      line-height: 1;
       font-weight: 800;
-      letter-spacing: 2px;
-      background: linear-gradient(135deg, #e63946, #ff8c42);
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
       -webkit-background-clip: text;
+      background-clip: text;
       -webkit-text-fill-color: transparent;
-      margin-bottom: 16px;
     }
     #splash .tagline {
-      font-size: 18px;
-      color: rgba(255,255,255,0.5);
+      font-size: 1.35rem;
       font-weight: 400;
+      color: var(--text-dim);
+      letter-spacing: 0.01em;
     }
-    #splash .ready-text {
-      margin-top: 40px;
-      font-size: 14px;
-      color: rgba(255,255,255,0.3);
-      animation: pulse 2s ease-in-out infinite;
+    #splash .ready {
+      margin-top: 2.2rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.7rem;
+      padding: 0.7rem 1.4rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.04);
+      font-size: 1rem;
+      color: var(--text-dim);
     }
-    @keyframes pulse {
-      0%, 100% { opacity: 0.3; }
-      50% { opacity: 0.7; }
+    #splash .ready .dot {
+      width: 0.6rem;
+      height: 0.6rem;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 0 rgba(230,57,70,0.6);
+      animation: ping 1.8s ease-out infinite;
+    }
+    @keyframes ping {
+      0%   { box-shadow: 0 0 0 0 rgba(230,57,70,0.55); }
+      80%  { box-shadow: 0 0 0 0.9rem rgba(230,57,70,0); }
+      100% { box-shadow: 0 0 0 0 rgba(230,57,70,0); }
     }
 
-    /* Player */
+    /* ── Player ──────────────────────────────────────────────────── */
     #player {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
+      position: fixed;
+      inset: 0;
       z-index: 5;
     }
     cast-media-player {
       width: 100%;
       height: 100%;
-      --background-color: #0a0a14;
-      --advancement-color: #e63946;
+      --background-color: var(--bg);
+      --progress-color: var(--accent);
+      --advancement-color: var(--accent);
       --advancement-disabled-color: rgba(255,255,255,0.2);
+      --spinner-color: var(--accent);
+      --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       --splash-image: none;
       --splash-size: contain;
-      --spinner-color: #e63946;
       --playback-logo-image: none;
       --watermark-color: rgba(255,255,255,0.15);
     }
 
-    /* Forensic fingerprint watermark — above the video, never blocks input.
-       Sits below the transient branding overlay so the title stays readable. */
+    /* ── Forensic fingerprint watermark ───────────────────────────
+       Above the video, never blocks input; below the now-playing bar. */
     #wm-layer {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
+      position: fixed;
+      inset: 0;
       z-index: 15;
       pointer-events: none;
       overflow: hidden;
+      display: none;
     }
     .wm {
       position: absolute;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-weight: 600;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.03em;
       white-space: nowrap;
       color: #ffffff;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.55);
+      text-shadow: 0 0.08rem 0.16rem rgba(0,0,0,0.55);
       transition: top 0.6s ease, left 0.6s ease, right 0.6s ease, bottom 0.6s ease;
     }
     #wm-tiled {
-      position: absolute;
+      position: fixed;
       top: -10%; left: -10%; right: -10%; bottom: -10%;
       z-index: 15;
       pointer-events: none;
@@ -112,64 +154,125 @@
     }
     #wm-tiled .wm-cell {
       width: 32%;
+      margin: 2.5% 0;
       text-align: center;
       font-weight: 500;
       white-space: nowrap;
       color: #ffffff;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      text-shadow: 0 0.08rem 0.16rem rgba(0,0,0,0.5);
     }
 
-    /* Overlay branding on top of player */
+    /* ── Now playing bar (top) ────────────────────────────────────── */
     #overlay {
-      position: absolute;
+      position: fixed;
       top: 0; left: 0; right: 0;
-      padding: 24px 32px;
       z-index: 20;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%);
+      gap: 2rem;
+      padding: var(--safe-y) var(--safe-x) 6rem;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.35) 55%, transparent 100%);
       opacity: 0;
-      transition: opacity 0.3s ease;
+      transform: translateY(-0.6rem);
+      transition: opacity 0.35s ease, transform 0.35s ease;
       pointer-events: none;
     }
-    #overlay.visible { opacity: 1; }
+    #overlay.visible { opacity: 1; transform: none; }
 
     #overlay .brand {
+      flex: 0 0 auto;
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      background: linear-gradient(135deg, #ffffff, rgba(255,255,255,0.75));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    #overlay .now-playing {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 1.1rem;
+      min-width: 0;
+      max-width: 60%;
     }
-    #overlay .brand-logo {
-      height: 32px;
-      object-fit: contain;
+    #overlay .art {
+      flex: 0 0 auto;
+      width: 6.4rem;
+      height: 3.6rem;
+      border-radius: 0.5rem;
+      object-fit: cover;
+      background: rgba(255,255,255,0.08);
+      box-shadow: 0 0.3rem 1.2rem rgba(0,0,0,0.45);
+      display: none;
     }
-    #overlay .brand-name {
-      font-size: 20px;
-      font-weight: 700;
-      letter-spacing: 1px;
-    }
-    #overlay .now-playing {
+    #overlay .art.shown { display: block; }
+    #overlay .meta {
+      min-width: 0;
       text-align: right;
     }
-    #overlay .now-playing .title {
-      font-size: 18px;
-      font-weight: 600;
+    #overlay .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.7rem;
+      min-width: 0;
     }
-    #overlay .now-playing .subtitle {
-      font-size: 13px;
-      color: rgba(255,255,255,0.6);
-      margin-top: 4px;
+    #overlay .title {
+      font-size: 1.55rem;
+      font-weight: 700;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #overlay .live {
+      flex: 0 0 auto;
+      display: none;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 0.35rem;
+      background: var(--accent);
+      font-size: 0.8rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+    }
+    #overlay .live.shown { display: inline-flex; }
+    #overlay .live::before {
+      content: '';
+      width: 0.45rem;
+      height: 0.45rem;
+      border-radius: 50%;
+      background: #fff;
+    }
+    #overlay .subtitle {
+      margin-top: 0.3rem;
+      font-size: 1.05rem;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Narrow / portrait previews: stack instead of squeezing the title. */
+    @media (max-aspect-ratio: 4/3) {
+      #overlay { flex-direction: column; align-items: flex-start; gap: 1rem; }
+      #overlay .now-playing { max-width: 100%; }
+      #overlay .meta { text-align: left; }
+      #overlay .title-row { justify-content: flex-start; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Idle/Splash Screen — branded text logo -->
+  <!-- Idle / splash -->
   <div id="splash">
     <div class="logo-text" id="platformName">StreamNxt+</div>
     <div class="tagline" id="tagline">Your Entertainment, Your Way</div>
-    <div class="ready-text">Ready to cast</div>
+    <div class="ready"><span class="dot"></span>Ready to cast</div>
   </div>
 
   <!-- Cast Media Player (Google's built-in player component) -->
@@ -181,14 +284,18 @@
   <div id="wm-layer"><div id="wm" class="wm"></div></div>
   <div id="wm-tiled"></div>
 
-  <!-- Top overlay with branding + now playing info -->
+  <!-- Now playing bar -->
   <div id="overlay">
-    <div class="brand">
-      <span class="brand-name" id="overlayBrand">StreamNxt+</span>
-    </div>
+    <div class="brand" id="overlayBrand">StreamNxt+</div>
     <div class="now-playing">
-      <div class="title" id="mediaTitle"></div>
-      <div class="subtitle" id="mediaSubtitle"></div>
+      <div class="meta">
+        <div class="title-row">
+          <span class="live" id="liveBadge">LIVE</span>
+          <div class="title" id="mediaTitle"></div>
+        </div>
+        <div class="subtitle" id="mediaSubtitle"></div>
+      </div>
+      <img class="art" id="mediaArt" alt="">
     </div>
   </div>
 
@@ -213,6 +320,8 @@
     const overlay = document.getElementById('overlay');
     const mediaTitle = document.getElementById('mediaTitle');
     const mediaSubtitle = document.getElementById('mediaSubtitle');
+    const mediaArt = document.getElementById('mediaArt');
+    const liveBadge = document.getElementById('liveBadge');
 
     let overlayTimer = null;
 
@@ -220,6 +329,35 @@
       overlay.classList.add('visible');
       clearTimeout(overlayTimer);
       overlayTimer = setTimeout(() => overlay.classList.remove('visible'), 5000);
+    }
+
+    // Fill the now-playing bar from the loaded media: title, subtitle, the
+    // first artwork image (widest last — a backdrop reads better in a 16:9
+    // thumb), and a LIVE badge for live streams.
+    function fillNowPlaying(media) {
+      const md = (media && media.metadata) || {};
+      mediaTitle.textContent = md.title || '';
+      mediaSubtitle.textContent = md.subtitle || '';
+      const imgs = Array.isArray(md.images) ? md.images : [];
+      const art = imgs.length ? (imgs[imgs.length - 1].url || imgs[0].url) : '';
+      if (art) {
+        mediaArt.onerror = () => mediaArt.classList.remove('shown');
+        mediaArt.src = art;
+        mediaArt.classList.add('shown');
+      } else {
+        mediaArt.removeAttribute('src');
+        mediaArt.classList.remove('shown');
+      }
+      const isLive = !!media && media.streamType === cast.framework.messages.StreamType.LIVE;
+      liveBadge.classList.toggle('shown', isLive);
+    }
+
+    function clearNowPlaying() {
+      mediaTitle.textContent = '';
+      mediaSubtitle.textContent = '';
+      mediaArt.removeAttribute('src');
+      mediaArt.classList.remove('shown');
+      liveBadge.classList.remove('shown');
     }
 
     // ── Forensic watermark ──────────────────────────────────────────────────
@@ -278,8 +416,10 @@
 
       const opacity = (typeof wmCfg.opacity === 'number') ? wmCfg.opacity : 0.12;
       const color   = wmCfg.color || '#ffffff';
-      // TVs are viewed from a distance — scale the phone/web font up.
-      const fontPx  = Math.round((wmCfg.fontSize || 16) * 1.6);
+      // The sender's size is a phone/web px value. Expressed in rem it scales
+      // with the screen like the rest of the page; ×1.1 because a TV is viewed
+      // from further away.
+      const fontRem = ((wmCfg.fontSize || 16) / 16) * 1.1;
       const mode    = wmCfg.mode || 'roaming';
 
       if (mode === 'tiled') {
@@ -291,8 +431,7 @@
           const c = document.createElement('div');
           c.className = 'wm-cell';
           c.style.color = color;
-          c.style.fontSize = Math.round(fontPx * 0.85) + 'px';
-          c.style.margin = '2.5% 0';
+          c.style.fontSize = (fontRem * 0.85).toFixed(3) + 'rem';
           c.textContent = txt;
           tiledEl.appendChild(c);
         }
@@ -308,7 +447,7 @@
       wmLayer.style.display = 'block';
       wmEl.style.opacity  = String(opacity);
       wmEl.style.color    = color;
-      wmEl.style.fontSize = fontPx + 'px';
+      wmEl.style.fontSize = fontRem.toFixed(3) + 'rem';
       wmEl.textContent    = wmBaseText();
 
       if (mode === 'fixed') {
@@ -341,14 +480,9 @@
     // Media loaded — hide splash, show overlay briefly, draw the fingerprint
     playerManager.addEventListener(
       cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
-      (event) => {
+      () => {
         splash.classList.add('hidden');
-
-        const media = playerManager.getMediaInformation();
-        if (media && media.metadata) {
-          mediaTitle.textContent = media.metadata.title || '';
-          mediaSubtitle.textContent = media.metadata.subtitle || '';
-        }
+        fillNowPlaying(playerManager.getMediaInformation());
         showOverlay();
         wmRender();
       }
@@ -359,8 +493,7 @@
       cast.framework.events.EventType.MEDIA_FINISHED,
       () => {
         splash.classList.remove('hidden');
-        mediaTitle.textContent = '';
-        mediaSubtitle.textContent = '';
+        clearNowPlaying();
         wmHide();
       }
     );

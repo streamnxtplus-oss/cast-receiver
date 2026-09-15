@@ -7,29 +7,29 @@
   <style>
     /*
      * Sizing is relative to the screen, never fixed pixels. Cast devices lay
-     * the page out at very different CSS sizes — 1280×720 on older
-     * Chromecasts, 1920×1080 on newer ones, and larger on 4K sets — so pixel
-     * sizes that looked right on one read as "zoomed in" on another. The root
-     * font size follows the smaller viewport side and everything else is rem,
-     * so the whole layout scales as one. Clamped so it stays legible on a small
-     * browser preview and does not balloon on a huge one.
+     * the page out at 1280×720, 1920×1080 or larger, so the root font size
+     * follows the smaller viewport side and everything else is rem.
      *
      * COMPATIBILITY: Cast devices run old Chromium builds. No `inset` (Chrome
-     * 87), no flexbox `gap` (84), and `clamp()` (79) only as an override on a
-     * plain value. `inset: 0` on an older receiver left #player with no size —
-     * the video vanished while its audio played — and shrank the splash into
-     * the top-left corner. Use top/right/bottom/left and margins.
+     * 87), no flexbox `gap` (84), `clamp()` (79) only as an override on a plain
+     * value, and no `?.` / `??` in script (80). `inset: 0` on an older receiver
+     * left the player with no size — video gone, audio playing — and shrank the
+     * splash into a corner. Use top/right/bottom/left and margins.
+     *
+     * The player UI is our own. Google's <cast-media-player> drew a second
+     * title, logo and progress bar over ours; playback now runs in a plain
+     * <video> handed to the player manager (setMediaElement), and everything
+     * on screen below is this page.
      */
     :root {
       --accent: #e63946;
       --accent-2: #ff8c42;
       --bg: #07070d;
       --text: #ffffff;
-      --text-dim: rgba(255,255,255,0.62);
-      --text-faint: rgba(255,255,255,0.38);
-      /* TV title-safe area: keep text away from the edges some sets crop. */
+      --text-dim: rgba(255,255,255,0.68);
+      --text-faint: rgba(255,255,255,0.42);
       --safe-x: 5vw;
-      --safe-y: 5vh;
+      --safe-y: 5.5vh;
       font-size: 2.2vmin;
       font-size: clamp(10px, 2.2vmin, 40px);
     }
@@ -39,20 +39,48 @@
     html, body {
       width: 100%;
       height: 100%;
-      background: var(--bg);
+      background: #000;
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       overflow: hidden;
       -webkit-font-smoothing: antialiased;
     }
 
-    /* ── Idle / splash ───────────────────────────────────────────── */
-    #splash {
+    .fill {
       position: fixed;
       top: 0; right: 0; bottom: 0; left: 0;
       width: 100%;
       height: 100%;
-      z-index: 10;
+    }
+
+    /* ── Video ───────────────────────────────────────────────────── */
+    #video {
+      z-index: 1;
+      background: #000;
+      object-fit: contain;
+    }
+
+    /* ── Loading backdrop (VOD artwork until the first frame) ────── */
+    #backdrop {
+      z-index: 2;
+      background: var(--bg);
+      opacity: 0;
+      transition: opacity 0.6s ease;
+      pointer-events: none;
+    }
+    #backdrop.shown { opacity: 1; }
+    #backdrop .img {
+      position: absolute;
+      top: -4%; right: -4%; bottom: -4%; left: -4%;
+      background-size: cover;
+      background-position: center;
+      filter: blur(1.2rem) brightness(0.45);
+      -webkit-filter: blur(1.2rem) brightness(0.45);
+    }
+
+    /* ── Idle / splash ───────────────────────────────────────────── */
+    #splash {
+      z-index: 30;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -66,7 +94,6 @@
       transition: opacity 0.6s ease;
     }
     #splash.hidden { opacity: 0; pointer-events: none; }
-
     #splash .logo-text {
       font-size: 4.6rem;
       line-height: 1;
@@ -80,9 +107,7 @@
     #splash .tagline {
       margin-top: 1.2rem;
       font-size: 1.35rem;
-      font-weight: 400;
       color: var(--text-dim);
-      letter-spacing: 0.01em;
     }
     #splash .ready {
       margin-top: 2.2rem;
@@ -101,7 +126,6 @@
       height: 0.6rem;
       border-radius: 50%;
       background: var(--accent);
-      box-shadow: 0 0 0 0 rgba(230,57,70,0.6);
       animation: ping 1.8s ease-out infinite;
     }
     @keyframes ping {
@@ -110,34 +134,8 @@
       100% { box-shadow: 0 0 0 0 rgba(230,57,70,0); }
     }
 
-    /* ── Player ──────────────────────────────────────────────────── */
-    #player {
-      position: fixed;
-      top: 0; right: 0; bottom: 0; left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 5;
-    }
-    cast-media-player {
-      width: 100%;
-      height: 100%;
-      --background-color: var(--bg);
-      --progress-color: var(--accent);
-      --advancement-color: var(--accent);
-      --advancement-disabled-color: rgba(255,255,255,0.2);
-      --spinner-color: var(--accent);
-      --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      --splash-image: none;
-      --splash-size: contain;
-      --playback-logo-image: none;
-      --watermark-color: rgba(255,255,255,0.15);
-    }
-
-    /* ── Forensic fingerprint watermark ───────────────────────────
-       Above the video, never blocks input; below the now-playing bar. */
+    /* ── Watermark ───────────────────────────────────────────────── */
     #wm-layer {
-      position: fixed;
-      top: 0; right: 0; bottom: 0; left: 0;
       z-index: 15;
       pointer-events: none;
       overflow: hidden;
@@ -173,142 +171,265 @@
       text-shadow: 0 0.08rem 0.16rem rgba(0,0,0,0.5);
     }
 
-    /* ── Now playing bar (top) ────────────────────────────────────── */
-    #overlay {
-      position: fixed;
-      top: 0; left: 0; right: 0;
+    /* ── Player chrome (shown on start / pause / seek) ───────────── */
+    #chrome {
       z-index: 20;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--safe-y) var(--safe-x) 6rem;
-      background: linear-gradient(to bottom, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.35) 55%, transparent 100%);
-      opacity: 0;
-      transform: translateY(-0.6rem);
-      transition: opacity 0.35s ease, transform 0.35s ease;
       pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.4s ease;
     }
-    #overlay.visible { opacity: 1; transform: none; }
+    body.ui #chrome { opacity: 1; }
 
-    #overlay .brand {
-      flex: 0 0 auto;
-      margin-right: 2rem;
-      font-size: 1.5rem;
+    #chrome .scrim-top {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 24vh;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+    }
+    #chrome .scrim-bottom {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 55vh;
+      background: linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.55) 45%, transparent 100%);
+    }
+
+    #chrome .brand {
+      position: absolute;
+      top: var(--safe-y);
+      left: var(--safe-x);
+      font-size: 1.45rem;
       font-weight: 800;
       letter-spacing: -0.01em;
-      background: linear-gradient(135deg, #ffffff, rgba(255,255,255,0.75));
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
       -webkit-background-clip: text;
       background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
-    #overlay .now-playing {
+    #chrome .info {
+      position: absolute;
+      left: var(--safe-x);
+      right: var(--safe-x);
+      bottom: var(--safe-y);
       display: flex;
-      align-items: center;
-      min-width: 0;
-      max-width: 60%;
+      align-items: flex-end;
+      transform: translateY(1rem);
+      transition: transform 0.4s ease;
     }
-    #overlay .art {
+    body.ui #chrome .info { transform: none; }
+
+    /* Artwork: a 2:3 poster for films and episodes, a square tile for a live
+       channel's logo (logos are drawn to fit, never cropped). */
+    #chrome .art {
       flex: 0 0 auto;
-      margin-left: 1.1rem;
-      width: 6.4rem;
-      height: 3.6rem;
-      border-radius: 0.5rem;
-      object-fit: cover;
-      background: rgba(255,255,255,0.08);
-      box-shadow: 0 0.3rem 1.2rem rgba(0,0,0,0.45);
+      margin-right: 2rem;
+      border-radius: 0.7rem;
+      overflow: hidden;
+      background: rgba(255,255,255,0.07);
+      box-shadow: 0 0.6rem 2rem rgba(0,0,0,0.55);
       display: none;
     }
-    #overlay .art.shown { display: block; }
-    #overlay .meta {
-      min-width: 0;
-      text-align: right;
+    #chrome .art.shown { display: block; }
+    #chrome .art img { display: block; width: 100%; height: 100%; }
+    #chrome .art.poster { width: 9.5rem; height: 14.25rem; }
+    #chrome .art.poster img { object-fit: cover; }
+    #chrome .art.logo {
+      width: 9rem;
+      height: 9rem;
+      padding: 1.1rem;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.14);
     }
-    #overlay .title-row {
+    #chrome .art.logo img { object-fit: contain; }
+
+    #chrome .meta {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding-bottom: 0.2rem;
+    }
+    #chrome .badges {
       display: flex;
       align-items: center;
-      justify-content: flex-end;
-      min-width: 0;
+      margin-bottom: 0.8rem;
     }
-    #overlay .title {
-      font-size: 1.55rem;
-      font-weight: 700;
-      line-height: 1.2;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    #overlay .live {
-      flex: 0 0 auto;
+    #chrome .badge {
       display: none;
       align-items: center;
       margin-right: 0.7rem;
-      padding: 0.2rem 0.6rem;
+      padding: 0.25rem 0.7rem;
       border-radius: 0.35rem;
-      background: var(--accent);
-      font-size: 0.8rem;
+      font-size: 0.85rem;
       font-weight: 800;
       letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
-    #overlay .live.shown { display: inline-flex; }
-    #overlay .live::before {
+    #chrome .badge.shown { display: inline-flex; }
+    #chrome .badge.live { background: var(--accent); }
+    #chrome .badge.live::before {
       content: '';
-      margin-right: 0.4rem;
-      width: 0.45rem;
-      height: 0.45rem;
+      margin-right: 0.45rem;
+      width: 0.5rem;
+      height: 0.5rem;
       border-radius: 50%;
       background: #fff;
+      animation: blink 1.6s ease-in-out infinite;
     }
-    #overlay .subtitle {
-      margin-top: 0.3rem;
-      font-size: 1.05rem;
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    #chrome .badge.kind {
+      background: rgba(255,255,255,0.14);
+      color: var(--text-dim);
+    }
+    #chrome .title {
+      font-size: 2.6rem;
+      line-height: 1.15;
+      font-weight: 800;
+      letter-spacing: -0.015em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-shadow: 0 0.1rem 0.6rem rgba(0,0,0,0.5);
+    }
+    #chrome .subtitle {
+      margin-top: 0.45rem;
+      font-size: 1.2rem;
       color: var(--text-dim);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
-    /* Narrow / portrait previews: stack instead of squeezing the title. */
+    #chrome .progress {
+      margin-top: 1.6rem;
+      display: none;
+    }
+    #chrome .progress.shown { display: block; }
+    #chrome .track {
+      position: relative;
+      height: 0.35rem;
+      border-radius: 1rem;
+      background: rgba(255,255,255,0.2);
+      overflow: hidden;
+    }
+    #chrome .fill-bar {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      width: 0;
+      border-radius: 1rem;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }
+    #chrome .times {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 0.6rem;
+      font-size: 1rem;
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Centre status: pause glyph / buffering spinner ──────────── */
+    #status {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      z-index: 22;
+      width: 7rem;
+      height: 7rem;
+      margin: -3.5rem 0 0 -3.5rem;
+      border-radius: 50%;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.45);
+      pointer-events: none;
+    }
+    #status.paused, #status.buffering { display: flex; }
+    #status .pause { display: none; }
+    #status.paused .pause { display: flex; }
+    #status .pause span {
+      display: block;
+      width: 0.85rem;
+      height: 2.8rem;
+      margin: 0 0.45rem;
+      border-radius: 0.2rem;
+      background: #fff;
+    }
+    #status .spin {
+      display: none;
+      width: 4rem;
+      height: 4rem;
+      border-radius: 50%;
+      border: 0.35rem solid rgba(255,255,255,0.18);
+      border-top-color: var(--accent);
+      animation: spin 0.9s linear infinite;
+    }
+    #status.buffering { background: transparent; }
+    #status.buffering .spin { display: block; }
+    #status.buffering .pause { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Error message ───────────────────────────────────────────── */
+    #error {
+      z-index: 31;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: var(--safe-y) var(--safe-x);
+      background: rgba(7,7,13,0.92);
+    }
+    #error.shown { display: flex; }
+    #error .h { font-size: 2.2rem; font-weight: 800; }
+    #error .p { margin-top: 0.8rem; font-size: 1.2rem; color: var(--text-dim); }
+
+    /* Narrow / portrait: smaller artwork and title so the panel still fits. */
     @media (max-aspect-ratio: 4/3) {
-      #overlay { flex-direction: column; align-items: flex-start; }
-      #overlay .brand { margin: 0 0 1rem 0; }
-      #overlay .now-playing { max-width: 100%; }
-      #overlay .meta { text-align: left; }
-      #overlay .title-row { justify-content: flex-start; }
+      #chrome .art.poster { width: 7rem; height: 10.5rem; }
+      #chrome .art.logo { width: 7rem; height: 7rem; }
+      #chrome .title { font-size: 2rem; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Idle / splash -->
-  <div id="splash">
-    <div class="logo-text" id="platformName">StreamNxt+</div>
-    <div class="tagline" id="tagline">Your Entertainment, Your Way</div>
-    <div class="ready"><span class="dot"></span>Ready to cast</div>
-  </div>
+  <video id="video" class="fill" playsinline></video>
+  <div id="backdrop" class="fill"><div class="img" id="backdropImg"></div></div>
 
-  <!-- Cast Media Player (Google's built-in player component) -->
-  <div id="player">
-    <cast-media-player></cast-media-player>
-  </div>
-
-  <!-- Forensic fingerprint watermark (single roaming/fixed + tiled grid) -->
-  <div id="wm-layer"><div id="wm" class="wm"></div></div>
+  <div id="wm-layer" class="fill"><div id="wm" class="wm"></div></div>
   <div id="wm-tiled"></div>
 
-  <!-- Now playing bar -->
-  <div id="overlay">
-    <div class="brand" id="overlayBrand">StreamNxt+</div>
-    <div class="now-playing">
+  <div id="chrome" class="fill">
+    <div class="scrim-top"></div>
+    <div class="scrim-bottom"></div>
+    <div class="brand">StreamNxt+</div>
+    <div class="info">
+      <div class="art" id="art"><img id="artImg" alt=""></div>
       <div class="meta">
-        <div class="title-row">
-          <span class="live" id="liveBadge">LIVE</span>
-          <div class="title" id="mediaTitle"></div>
+        <div class="badges">
+          <span class="badge live" id="liveBadge">Live</span>
+          <span class="badge kind" id="kindBadge"></span>
         </div>
+        <div class="title" id="mediaTitle"></div>
         <div class="subtitle" id="mediaSubtitle"></div>
+        <div class="progress" id="progress">
+          <div class="track"><div class="fill-bar" id="progressFill"></div></div>
+          <div class="times"><span id="timeCur">0:00</span><span id="timeDur">0:00</span></div>
+        </div>
       </div>
-      <img class="art" id="mediaArt" alt="">
     </div>
+  </div>
+
+  <div id="status"><div class="pause"><span></span><span></span></div><div class="spin"></div></div>
+
+  <div id="error" class="fill">
+    <div class="h">Can't play this right now</div>
+    <div class="p">Try again from your phone.</div>
+  </div>
+
+  <div id="splash" class="fill">
+    <div class="logo-text">StreamNxt+</div>
+    <div class="tagline">Your Entertainment, Your Way</div>
+    <div class="ready"><span class="dot"></span>Ready to cast</div>
   </div>
 
   <!-- Google Cast CAF Receiver SDK -->
@@ -317,6 +438,11 @@
   <script>
     const context = cast.framework.CastReceiverContext.getInstance();
     const playerManager = context.getPlayerManager();
+    const E = cast.framework.events.EventType;
+
+    // Playback in our own element — no Google player UI over the video.
+    const videoEl = document.getElementById('video');
+    playerManager.setMediaElement(videoEl);
 
     // ── Configuration ──
     const options = new cast.framework.CastReceiverOptions();
@@ -327,58 +453,101 @@
       cast.framework.messages.Command.STREAM_VOLUME |
       cast.framework.messages.Command.STREAM_MUTE;
 
-    // ── Splash / Player visibility ──
-    const splash = document.getElementById('splash');
-    const overlay = document.getElementById('overlay');
-    const mediaTitle = document.getElementById('mediaTitle');
-    const mediaSubtitle = document.getElementById('mediaSubtitle');
-    const mediaArt = document.getElementById('mediaArt');
-    const liveBadge = document.getElementById('liveBadge');
+    // ── Elements ──
+    const $ = (id) => document.getElementById(id);
+    const splash = $('splash'), errorEl = $('error'), statusEl = $('status');
+    const backdrop = $('backdrop'), backdropImg = $('backdropImg');
+    const art = $('art'), artImg = $('artImg');
+    const titleEl = $('mediaTitle'), subtitleEl = $('mediaSubtitle');
+    const liveBadge = $('liveBadge'), kindBadge = $('kindBadge');
+    const progress = $('progress'), progressFill = $('progressFill');
+    const timeCur = $('timeCur'), timeDur = $('timeDur');
 
-    let overlayTimer = null;
+    let isLive = false;
+    let started = false;
+    let uiTimer = null;
 
-    function showOverlay() {
-      overlay.classList.add('visible');
-      clearTimeout(overlayTimer);
-      overlayTimer = setTimeout(() => overlay.classList.remove('visible'), 5000);
+    function fmt(sec) {
+      sec = Math.max(0, Math.floor(sec || 0));
+      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+      const ss = (s < 10 ? '0' : '') + s;
+      return h > 0 ? h + ':' + (m < 10 ? '0' : '') + m + ':' + ss : m + ':' + ss;
     }
 
-    // Fill the now-playing bar from the loaded media: title, subtitle, the
-    // first artwork image (widest last — a backdrop reads better in a 16:9
-    // thumb), and a LIVE badge for live streams.
-    function fillNowPlaying(media) {
+    // Show the chrome; auto-hide after `ms` unless paused (ms = 0 keeps it).
+    function showUi(ms) {
+      document.body.classList.add('ui');
+      clearTimeout(uiTimer);
+      if (ms) uiTimer = setTimeout(() => {
+        if (playerManager.getPlayerState() === cast.framework.messages.PlayerState.PLAYING) {
+          document.body.classList.remove('ui');
+        }
+      }, ms);
+    }
+    function hideUi() {
+      clearTimeout(uiTimer);
+      document.body.classList.remove('ui');
+    }
+
+    function imageUrl(images, index) {
+      const img = images && images[index];
+      return (img && img.url) ? img.url : '';
+    }
+
+    // Fill the panel from what the sender put in the media metadata. The
+    // mobile app sends a live channel's logo as the first image, and a title's
+    // poster first then its backdrop.
+    function fillMedia(media) {
       const md = (media && media.metadata) || {};
-      mediaTitle.textContent = md.title || '';
-      mediaSubtitle.textContent = md.subtitle || '';
-      const imgs = Array.isArray(md.images) ? md.images : [];
-      const art = imgs.length ? (imgs[imgs.length - 1].url || imgs[0].url) : '';
-      if (art) {
-        mediaArt.onerror = () => mediaArt.classList.remove('shown');
-        mediaArt.src = art;
-        mediaArt.classList.add('shown');
-      } else {
-        mediaArt.removeAttribute('src');
-        mediaArt.classList.remove('shown');
-      }
-      const isLive = !!media && media.streamType === cast.framework.messages.StreamType.LIVE;
+      const images = Array.isArray(md.images) ? md.images : [];
+      isLive = !!media && media.streamType === cast.framework.messages.StreamType.LIVE;
+
+      titleEl.textContent = md.title || '';
+      subtitleEl.textContent = (md.subtitle && !(isLive && /^live$/i.test(md.subtitle))) ? md.subtitle : '';
       liveBadge.classList.toggle('shown', isLive);
+      kindBadge.textContent = isLive ? '' : (md.metadataType === cast.framework.messages.MetadataType.TV_SHOW ? 'Episode' : '');
+      kindBadge.classList.toggle('shown', !!kindBadge.textContent);
+      progress.classList.toggle('shown', !isLive);
+
+      const primary = imageUrl(images, 0);
+      art.className = 'art ' + (isLive ? 'logo' : 'poster');
+      if (primary) {
+        artImg.onerror = () => art.classList.remove('shown');
+        artImg.src = primary;
+        art.classList.add('shown');
+      } else {
+        artImg.removeAttribute('src');
+      }
+
+      const wide = imageUrl(images, 1) || (isLive ? '' : primary);
+      backdropImg.style.backgroundImage = wide ? 'url("' + wide.replace(/"/g, '%22') + '")' : 'none';
     }
 
-    function clearNowPlaying() {
-      mediaTitle.textContent = '';
-      mediaSubtitle.textContent = '';
-      mediaArt.removeAttribute('src');
-      mediaArt.classList.remove('shown');
-      liveBadge.classList.remove('shown');
+    function updateProgress() {
+      if (isLive) return;
+      const dur = playerManager.getDurationSec() || 0;
+      const cur = playerManager.getCurrentTimeSec() || 0;
+      progressFill.style.width = (dur > 0 ? Math.min(100, (cur / dur) * 100) : 0) + '%';
+      timeCur.textContent = fmt(cur);
+      timeDur.textContent = dur > 0 ? fmt(dur) : '';
+    }
+
+    function resetToIdle() {
+      started = false;
+      hideUi();
+      statusEl.className = '';
+      backdrop.classList.remove('shown');
+      splash.classList.remove('hidden');
+      wmHide();
     }
 
     // ── Forensic watermark ──────────────────────────────────────────────────
-    // The sender (web / mobile) resolves the per-user fingerprint + style from
-    // the tenant's visibleWatermark config and ships it in media.customData.
-    // The receiver only renders it, so the fingerprint logic stays in one place.
-    const wmEl    = document.getElementById('wm');
-    const wmLayer = document.getElementById('wm-layer');
-    const tiledEl = document.getElementById('wm-tiled');
+    // The sender resolves the per-user fingerprint + style from the tenant's
+    // visibleWatermark config and ships it in media.customData; the receiver
+    // only renders it.
+    const wmEl    = $('wm');
+    const wmLayer = $('wm-layer');
+    const tiledEl = $('wm-tiled');
 
     const WM_POSITIONS = [
       { top: '8%',  left: '6%' },
@@ -405,9 +574,7 @@
       let t = (wmCfg && wmCfg.text) ? String(wmCfg.text) : '';
       if (wmCfg && wmCfg.showTimestamp) {
         const d = new Date();
-        const hh = ('0' + d.getHours()).slice(-2);
-        const mm = ('0' + d.getMinutes()).slice(-2);
-        t += '  ' + hh + ':' + mm;
+        t += '  ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
       }
       return t;
     }
@@ -428,9 +595,8 @@
 
       const opacity = (typeof wmCfg.opacity === 'number') ? wmCfg.opacity : 0.12;
       const color   = wmCfg.color || '#ffffff';
-      // The sender's size is a phone/web px value. Expressed in rem it scales
-      // with the screen like the rest of the page; ×1.1 because a TV is viewed
-      // from further away.
+      // Sender size is a phone/web px value; in rem it scales with the screen,
+      // ×1.1 because a TV is viewed from further away.
       const fontRem = ((wmCfg.fontSize || 16) / 16) * 1.1;
       const mode    = wmCfg.mode || 'roaming';
 
@@ -489,47 +655,55 @@
 
     // ── Player Events ──
 
-    // Media loaded — hide splash, show overlay briefly, draw the fingerprint
-    playerManager.addEventListener(
-      cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
-      () => {
-        splash.classList.add('hidden');
-        fillNowPlaying(playerManager.getMediaInformation());
-        showOverlay();
-        wmRender();
-      }
-    );
+    // A load starts: leave the splash, show the title's artwork while the
+    // stream spins up.
+    playerManager.addEventListener(E.PLAYER_LOADING, () => {
+      errorEl.classList.remove('shown');
+      splash.classList.add('hidden');
+      if (!isLive) backdrop.classList.add('shown');
+      statusEl.className = 'buffering';
+      showUi(0);
+    });
 
-    // Media ended — show splash again, drop the fingerprint
-    playerManager.addEventListener(
-      cast.framework.events.EventType.MEDIA_FINISHED,
-      () => {
-        splash.classList.remove('hidden');
-        clearNowPlaying();
-        wmHide();
-      }
-    );
+    playerManager.addEventListener(E.PLAYER_LOAD_COMPLETE, () => {
+      fillMedia(playerManager.getMediaInformation());
+      updateProgress();
+      wmRender();
+    });
 
-    // Playback started/resumed — flash overlay
-    playerManager.addEventListener(
-      cast.framework.events.EventType.PLAYING,
-      () => showOverlay()
-    );
+    playerManager.addEventListener(E.PLAYING, () => {
+      started = true;
+      backdrop.classList.remove('shown');
+      statusEl.className = '';
+      showUi(5000);
+    });
 
-    // Pause — show overlay persistently
-    playerManager.addEventListener(
-      cast.framework.events.EventType.PAUSE,
-      () => {
-        overlay.classList.add('visible');
-        clearTimeout(overlayTimer);
-      }
-    );
+    playerManager.addEventListener(E.PAUSE, () => {
+      if (!started) return;
+      statusEl.className = 'paused';
+      updateProgress();
+      showUi(0);
+    });
 
-    // Seek — flash overlay
-    playerManager.addEventListener(
-      cast.framework.events.EventType.SEEKED,
-      () => showOverlay()
-    );
+    playerManager.addEventListener(E.BUFFERING, (e) => {
+      if (e.isBuffering) statusEl.className = 'buffering';
+      else if (statusEl.className === 'buffering') statusEl.className = '';
+    });
+
+    playerManager.addEventListener(E.SEEKING, () => showUi(0));
+    playerManager.addEventListener(E.SEEKED, () => { updateProgress(); showUi(5000); });
+    playerManager.addEventListener(E.TIME_UPDATE, () => {
+      if (document.body.classList.contains('ui')) updateProgress();
+    });
+
+    playerManager.addEventListener(E.MEDIA_FINISHED, () => resetToIdle());
+
+    playerManager.addEventListener(E.ERROR, (event) => {
+      console.error('[StreamNXT Receiver] Error:', event.detailedErrorCode, event);
+      statusEl.className = '';
+      backdrop.classList.remove('shown');
+      errorEl.classList.add('shown');
+    });
 
     // ── Intercept LOAD request for custom handling ──
     playerManager.setMessageInterceptor(
@@ -540,6 +714,10 @@
           const cd = request && request.media && request.media.customData;
           wmCfg = (cd && cd.watermark && cd.watermark.text) ? cd.watermark : null;
         } catch (e) { wmCfg = null; }
+
+        // Artwork and title from the request itself: the player's own media
+        // information is not populated yet while it is still loading.
+        try { fillMedia(request && request.media); } catch (e) {}
 
         // IMPORTANT: do NOT force hlsSegmentFormat here. The AUDIO container
         // differs per title (encoded = TS-wrapped, imported = raw ADTS) and the
@@ -559,14 +737,6 @@
       } catch (e) {}
       wmRender();
     });
-
-    // ── Error handling ──
-    playerManager.addEventListener(
-      cast.framework.events.EventType.ERROR,
-      (event) => {
-        console.error('[StreamNXT Receiver] Error:', event.detailedErrorCode, event);
-      }
-    );
 
     // ── Start the receiver ──
     context.start(options);
